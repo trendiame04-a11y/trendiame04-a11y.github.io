@@ -498,7 +498,11 @@ if(!nubeCfg.activo)return;
 clearTimeout(window.__nubeDebounce);
 window.__nubeDebounce=setTimeout(nubeSubir,800);
 }
+function hayModalAbierto(){
+return !!document.querySelector('.modal-overlay.abierto');
+}
 function nubeBajar(silencioso){
+if(silencioso&&hayModalAbierto())return;
 var url=nubeUrlDatos();if(!url)return;
 if(!silencioso)nubeEstadoUI('Descargando datos compartidos…','var(--amarillo)');
 fetch(url).then(function(r){
