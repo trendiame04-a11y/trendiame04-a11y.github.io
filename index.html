@@ -1,4 +1,4 @@
-   <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -501,8 +501,15 @@ window.__nubeDebounce=setTimeout(nubeSubir,800);
 function nubeBajar(silencioso){
 var url=nubeUrlDatos();if(!url)return;
 if(!silencioso)nubeEstadoUI('Descargando datos compartidos…','var(--amarillo)');
-fetch(url).then(function(r){return r.json()}).then(function(d){
+fetch(url).then(function(r){
+if(!r.ok)throw new Error('http_'+r.status);
+return r.json();
+}).then(function(d){
 if(!d){if(!silencioso)nubeEstadoUI('La nube está vacía todavía: se subirán tus datos locales.','var(--gris)'),nubeSubir();return}
+if(typeof d!=='object'||d.error||(!Array.isArray(d.productos)&&!Array.isArray(d.ventas))){
+if(!silencioso)nubeEstadoUI('⚠️ La nube respondió algo inesperado (posible error de permisos). No se tocaron tus datos locales.','#D93025');
+return;
+}
 var local=nubeRecopilarDatos();
 if(silencioso&&d.actualizadoEn&&d.actualizadoEn<=(local.__ultimaAplicada||0))return;
 productos=d.productos||[];ventas=d.ventas||[];clientes=d.clientes||[];pagos=d.pagos||[];movimientos=d.movimientos||[];
@@ -511,7 +518,7 @@ sueldos=d.sueldos||[];notaEstrategia=d.notaEstrategia||'';
 local.__ultimaAplicada=d.actualizadoEn;
 guardarTodo(true);renderTodo();
 if(!silencioso)nubeEstadoUI('✅ Datos compartidos cargados','var(--verde)');
-}).catch(function(){if(!silencioso)nubeEstadoUI('⚠️ No se pudo conectar a la nube','#D93025')});
+}).catch(function(){if(!silencioso)nubeEstadoUI('⚠️ No se pudo conectar a la nube (permiso denegado o URL/clave incorrecta). No se tocaron tus datos locales.','#D93025')});
 }
 function nubeEstadoUI(msg,color){
 var el=$('nubeEstado');if(el){el.textContent=msg;el.style.color=color||'var(--gris)'}
