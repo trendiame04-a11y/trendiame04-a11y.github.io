@@ -321,7 +321,7 @@ Estas cifras se arman con lo que ustedes registran; TRENDIA no supone montos que
 <div class="modal">
 <div class="modal-head"><span>Sincronización compartida (dos usuarios)</span><button type="button" id="cerrarModalNube">✕</button></div>
 <div class="modal-body">
-<p style="font-size:.85rem;margin-bottom:12px">Para que David y su socio(a) vean los mismos datos desde cualquier dispositivo, TRENDIA puede guardar la información en una base de datos gratuita (Firebase Realtime Database) además de guardarla en este dispositivo. Ambos deben usar exactamente la misma URL y el mismo "espacio".</p>
+<p style="font-size:.85rem;margin-bottom:12px">Para que David, María Emilia y los demás dispositivos vean los mismos datos, TRENDIA usa Firebase Realtime Database como nube compartida. Cada celular/laptop conserva una copia local y sincroniza los cambios; si un dispositivo está sin internet, guarda el registro y lo sube cuando vuelve la conexión. Todos deben usar exactamente la misma URL y el mismo "espacio".</p>
 <div class="form-grid">
 <div class="campo full"><label>URL de la base de datos (Firebase Realtime Database)</label><input id="nubeUrl" placeholder="https://tu-proyecto-default-rtdb.firebaseio.com"></div>
 <div class="campo full"><label>Espacio compartido</label><input id="nubeEspacio" placeholder="trendia"></div>
@@ -475,7 +475,7 @@ var K_PROD='tendria_productos', K_VENT='tendria_ventas_v2', K_CLI='tendria_clien
     K_MOV='tendria_movimientos', K_CFG='tendria_configuracion', K_BKV='tendria_backup_version';
 var K_OLD_VENT='tendria_ventas', K_OLD_PROD='tendria_prod';
 var K_APORTES='tendria_aportes', K_GFORM='tendria_gastos_formalizacion', K_SUELDOS='tendria_sueldos', K_NOTA_ESTR='tendria_nota_estrategia';
-var K_NUBE_CFG='tendria_nube_cfg';
+var K_NUBE_CFG='tendria_nube_cfg', K_NUBE_META='tendria_nube_meta', K_NUBE_DEL='tendria_nube_eliminados', K_NUBE_DEVICE='tendria_nube_device';
 
 function leer(key){try{var x=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(x)?x:[]}catch(e){return[]}}
 function leerObj(key,def){try{var x=JSON.parse(localStorage.getItem(key)||'null');return x&&typeof x==='object'?x:def}catch(e){return def}}
@@ -484,6 +484,11 @@ var productos=leer(K_PROD), ventas=leer(K_VENT), clientes=leer(K_CLI), pagos=lee
 var config=leerObj(K_CFG,{stockBajoDefault:10});
 var aportes=leer(K_APORTES), gastosFormalizacion=leer(K_GFORM), sueldos=leer(K_SUELDOS);
 var notaEstrategia=localStorage.getItem(K_NOTA_ESTR)||'';
+var nubeDeviceId=localStorage.getItem(K_NUBE_DEVICE)||('dev-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8));
+localStorage.setItem(K_NUBE_DEVICE,nubeDeviceId);
+var nubeMeta=leerObj(K_NUBE_META,{notaUpdatedAt:0,notaUpdatedBy:'',configUpdatedAt:0,configUpdatedBy:''});
+var nubeEliminados=leer(K_NUBE_DEL);
+var nubePendiente=false;
 
 /* Migración: gastos operativos que fueron registrados por error en Publicidad.
    Se identifican por los conceptos exactos que corresponden a gastos del negocio. */
@@ -501,7 +506,9 @@ gastos=gastos.filter(function(g){
   }else{
     return true;
   }
-  gastosOp.push({id:uid(),fecha:g.fecha||hoy(),categoria:categoria,concepto:detalle,comprobante:'Sin comprobante',monto:Number(g.monto)||0});
+  var montoMigrado=Number(g.monto)||0;
+  var yaExiste=gastosOp.some(function(x){return (x.fecha||'')===(g.fecha||hoy()) && Number(x.monto||0)===montoMigrado && String(x.concepto||'').trim()===detalle;});
+  if(!yaExiste)gastosOp.push({id:uid(),fecha:g.fecha||hoy(),categoria:categoria,concepto:detalle,comprobante:'Sin comprobante',monto:montoMigrado});
   movidos.push(detalle);
   return false;
 });
@@ -541,7 +548,51 @@ productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
 if(productos.length||ventas.length)guardarTodo();
 })();
 
+function limpiarMeta(o){
+var c={};
+Object.keys(o||{}).forEach(function(k){if(k!=='_updatedAt'&&k!=='_updatedBy')c[k]=o[k]});
+return c;
+}
+function mismoRegistro(a,b){return JSON.stringify(limpiarMeta(a||{}))===JSON.stringify(limpiarMeta(b||{}));}
+function marcarCambiosLista(actual,key,coleccion,ahora){
+var previo=leer(key), mapa={};
+previo.forEach(function(x){if(x&&x.id!=null)mapa[String(x.id)]=x});
+var presentes={};
+(actual||[]).forEach(function(x){
+  if(!x.id)x.id=uid();
+  presentes[String(x.id)]=1;
+  var ant=mapa[String(x.id)];
+  if(!ant||!mismoRegistro(ant,x)||!x._updatedAt){x._updatedAt=ahora;x._updatedBy=nubeDeviceId}
+});
+previo.forEach(function(x){
+  if(x&&x.id!=null&&!presentes[String(x.id)]){
+    nubeEliminados.push({coleccion:coleccion,id:x.id,_updatedAt:ahora,_updatedBy:nubeDeviceId});
+  }
+});
+}
+function dedupeEliminados(){
+var m={};
+nubeEliminados.forEach(function(t){if(!t||!t.id||!t.coleccion)return;var k=t.coleccion+'|'+t.id;var a=m[k];if(!a||Number(t._updatedAt||0)>=Number(a._updatedAt||0))m[k]=t});
+nubeEliminados=Object.keys(m).map(function(k){return m[k]}).sort(function(a,b){return Number(b._updatedAt||0)-Number(a._updatedAt||0)}).slice(0,5000);
+}
 function guardarTodo(desdeNube){
+var ahora=Date.now();
+if(!desdeNube){
+  marcarCambiosLista(productos,K_PROD,'productos',ahora);
+  marcarCambiosLista(ventas,K_VENT,'ventas',ahora);
+  marcarCambiosLista(pagos,K_PAGO,'pagos',ahora);
+  marcarCambiosLista(movimientos,K_MOV,'movimientos',ahora);
+  marcarCambiosLista(gastos,K_GASTO,'gastos',ahora);
+  marcarCambiosLista(gastosOp,K_GASTOOP,'gastosOp',ahora);
+  marcarCambiosLista(aportes,K_APORTES,'aportes',ahora);
+  marcarCambiosLista(gastosFormalizacion,K_GFORM,'gastosFormalizacion',ahora);
+  marcarCambiosLista(sueldos,K_SUELDOS,'sueldos',ahora);
+  var oldNota=localStorage.getItem(K_NOTA_ESTR)||'';
+  if(oldNota!==String(notaEstrategia)){nubeMeta.notaUpdatedAt=ahora;nubeMeta.notaUpdatedBy=nubeDeviceId}
+  var oldCfg=leerObj(K_CFG,{stockBajoDefault:10});
+  if(JSON.stringify(oldCfg)!==JSON.stringify(config)){nubeMeta.configUpdatedAt=ahora;nubeMeta.configUpdatedBy=nubeDeviceId}
+  dedupeEliminados();
+}
 localStorage.setItem(K_PROD,JSON.stringify(productos));
 localStorage.setItem(K_VENT,JSON.stringify(ventas));
 localStorage.setItem(K_CLI,JSON.stringify(clientes));
@@ -554,12 +605,14 @@ localStorage.setItem(K_APORTES,JSON.stringify(aportes));
 localStorage.setItem(K_GFORM,JSON.stringify(gastosFormalizacion));
 localStorage.setItem(K_SUELDOS,JSON.stringify(sueldos));
 localStorage.setItem(K_NOTA_ESTR,notaEstrategia);
-localStorage.setItem(K_BKV,'6');
-if(!desdeNube)nubeSubirDebounced();
+localStorage.setItem(K_NUBE_META,JSON.stringify(nubeMeta));
+localStorage.setItem(K_NUBE_DEL,JSON.stringify(nubeEliminados));
+localStorage.setItem(K_BKV,'7');
+if(!desdeNube){nubePendiente=true;nubeSubirDebounced();}
 }
 
 /* ============================================================
-   SINCRONIZACIÓN COMPARTIDA EN LA NUBE (arquitectura separada)
+   SINCRONIZACIÓN COMPARTIDA — MULTIDISPOSITIVO Y OFFLINE
    ============================================================ */
 var nubeTimer=null, nubeSubiendo=false;
 function nubeUrlDatos(){
@@ -568,64 +621,146 @@ var base=nubeCfg.url.replace(/\/$/,'');
 var espacio=(nubeCfg.espacio||'trendia').replace(/[^a-zA-Z0-9_-]/g,'')||'trendia';
 return base+'/'+espacio+'.json';
 }
+function nubeColecciones(){return [
+  ['productos',productos],['ventas',ventas],['pagos',pagos],['movimientos',movimientos],
+  ['gastos',gastos],['gastosOp',gastosOp],['aportes',aportes],['gastosFormalizacion',gastosFormalizacion],['sueldos',sueldos]
+];}
+function nubeMetaActual(){
+return {nota:{valor:notaEstrategia,updatedAt:Number(nubeMeta.notaUpdatedAt||0),updatedBy:nubeMeta.notaUpdatedBy||''},
+config:{valor:config,updatedAt:Number(nubeMeta.configUpdatedAt||0),updatedBy:nubeMeta.configUpdatedBy||''}};
+}
 function nubeRecopilarDatos(){
-return {version:6,actualizadoEn:Date.now(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,
+return {version:7,actualizadoEn:Date.now(),dispositivo:nubeDeviceId,productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,
 movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,
-gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
+gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia,
+eliminados:nubeEliminados,meta:nubeMetaActual()};
 }
-function nubeSubir(){
-if(!nubeCfg.activo)return;
-var url=nubeUrlDatos();if(!url)return;
-nubeEstadoUI('Sincronizando…','var(--amarillo)');
-fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(nubeRecopilarDatos())})
-.then(function(r){if(!r.ok)throw Error();nubeEstadoUI('✅ Sincronizado '+new Date().toLocaleTimeString(),'var(--verde)')})
-.catch(function(){nubeEstadoUI('⚠️ No se pudo sincronizar (revisa la URL o tu conexión)','#D93025')});
+function normalizarCloud(d){
+if(!d||typeof d!=='object')return null;
+var baseTs=Number(d.actualizadoEn||Date.now());
+var out={version:7,actualizadoEn:baseTs,productos:Array.isArray(d.productos)?d.productos:[],ventas:Array.isArray(d.ventas)?d.ventas:[],
+clientes:Array.isArray(d.clientes)?d.clientes:[],pagos:Array.isArray(d.pagos)?d.pagos:[],movimientos:Array.isArray(d.movimientos)?d.movimientos:[],
+gastos:Array.isArray(d.gastos)?d.gastos:[],gastosOp:Array.isArray(d.gastosOp)?d.gastosOp:[],configuracion:d.configuracion||{stockBajoDefault:10},
+aportes:Array.isArray(d.aportes)?d.aportes:[],gastosFormalizacion:Array.isArray(d.gastosFormalizacion)?d.gastosFormalizacion:[],
+sueldos:Array.isArray(d.sueldos)?d.sueldos:[],notaEstrategia:typeof d.notaEstrategia==='string'?d.notaEstrategia:'',
+eliminados:Array.isArray(d.eliminados)?d.eliminados:[],meta:d.meta||{nota:{valor:typeof d.notaEstrategia==='string'?d.notaEstrategia:'',updatedAt:baseTs,updatedBy:''},config:{valor:d.configuracion||{stockBajoDefault:10},updatedAt:baseTs,updatedBy:''}}};
+['productos','ventas','pagos','movimientos','gastos','gastosOp','aportes','gastosFormalizacion','sueldos'].forEach(function(k){
+  out[k].forEach(function(x){if(x&&!x._updatedAt)x._updatedAt=baseTs;if(x&&!x._updatedBy)x._updatedBy=d.dispositivo||'legacy'});
+});
+if(!out.meta.nota)out.meta.nota={valor:out.notaEstrategia,updatedAt:baseTs,updatedBy:d.dispositivo||'legacy'};
+if(!out.meta.config)out.meta.config={valor:out.configuracion||{stockBajoDefault:10},updatedAt:baseTs,updatedBy:d.dispositivo||'legacy'};
+return out;
 }
+function compararVersion(a,b){
+var ta=Number(a&&a._updatedAt||0),tb=Number(b&&b._updatedAt||0);
+if(ta!==tb)return ta-tb;
+return String(a&&a._updatedBy||'').localeCompare(String(b&&b._updatedBy||''));
+}
+function mergeLista(local,remote,coleccion,tombstones){
+var m={};
+(local||[]).forEach(function(x){if(x&&x.id!=null)m[String(x.id)]=x});
+(remote||[]).forEach(function(x){if(!x||x.id==null)return;var k=String(x.id),e=m[k];if(!e||compararVersion(x,e)>0)m[k]=x});
+(tombstones||[]).forEach(function(t){if(!t||t.coleccion!==coleccion||t.id==null)return;var k=String(t.id),e=m[k];if(e&&Number(t._updatedAt||0)>=Number(e._updatedAt||0))delete m[k]});
+return Object.keys(m).map(function(k){return m[k]});
+}
+function mergeCloud(local,remote){
+var r=normalizarCloud(remote)||normalizarCloud({version:7,actualizadoEn:0})||{};
+var allDel=(local.eliminados||[]).concat(r.eliminados||[]);
+var out={version:7,actualizadoEn:Date.now(),dispositivo:nubeDeviceId};
+['productos','ventas','pagos','movimientos','gastos','gastosOp','aportes','gastosFormalizacion','sueldos'].forEach(function(k){out[k]=mergeLista(local[k]||[],r[k]||[],k,allDel)});
+out.eliminados=allDel;dedupeListaEliminados(out.eliminados);
+var lm=local.meta||nubeMetaActual(),rm=r.meta||{};
+var mn=(Number(lm.nota&&lm.nota.updatedAt||0)>Number(rm.nota&&rm.nota.updatedAt||0))?lm.nota:rm.nota;
+var mc=(Number(lm.config&&lm.config.updatedAt||0)>Number(rm.config&&rm.config.updatedAt||0))?lm.config:rm.config;
+out.meta={nota:mn||{valor:local.notaEstrategia||'',updatedAt:0,updatedBy:''},config:mc||{valor:local.configuracion||{stockBajoDefault:10},updatedAt:0,updatedBy:''}};
+out.notaEstrategia=out.meta.nota.valor||'';
+out.configuracion=out.meta.config.valor||{stockBajoDefault:10};
+out.clientes=[];
+return out;
+}
+function dedupeListaEliminados(lista){
+var m={};(lista||[]).forEach(function(t){if(!t||!t.id||!t.coleccion)return;var k=t.coleccion+'|'+t.id,e=m[k];if(!e||Number(t._updatedAt||0)>=Number(e._updatedAt||0))m[k]=t});
+lista.length=0;Object.keys(m).map(function(k){return m[k]}).sort(function(a,b){return Number(b._updatedAt||0)-Number(a._updatedAt||0)}).slice(0,5000).forEach(function(t){lista.push(t)});
+}
+function nubePrepararEstadoLocal(){
+return {version:7,actualizadoEn:Date.now(),dispositivo:nubeDeviceId,productos:productos,ventas:ventas,pagos:pagos,movimientos:movimientos,
+gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,
+notaEstrategia:notaEstrategia,eliminados:nubeEliminados,meta:nubeMetaActual()};
+}
+function recalcularStockDesdeMovimientos(){
+var porSku={};
+movimientos.forEach(function(m){var sku=String(m.sku||'');if(!sku)return;porSku[sku]=(porSku[sku]||0)+(Number(m.cantidad)||0)});
+productos.forEach(function(p){var base=Number(p.stockInicial);if(!isFinite(base))base=Number(p.stock)||0;p.stock=base+(porSku[String(p.sku||'')]||0)});
+}
+function aplicarCloud(d){
+var x=normalizarCloud(d);if(!x)return false;
+productos=x.productos||[];ventas=x.ventas||[];pagos=x.pagos||[];movimientos=x.movimientos||[];gastos=x.gastos||[];gastosOp=x.gastosOp||[];
+config=x.configuracion||config;aportes=x.aportes||[];gastosFormalizacion=x.gastosFormalizacion||[];sueldos=x.sueldos||[];nubeEliminados=x.eliminados||[];
+notaEstrategia=x.notaEstrategia||'';nubeMeta={notaUpdatedAt:Number(x.meta&&x.meta.nota&&x.meta.nota.updatedAt||0),notaUpdatedBy:(x.meta&&x.meta.nota&&x.meta.nota.updatedBy)||'',configUpdatedAt:Number(x.meta&&x.meta.config&&x.meta.config.updatedAt||0),configUpdatedBy:(x.meta&&x.meta.config&&x.meta.config.updatedBy)||''};
+productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
+recalcularStockDesdeMovimientos();
+migrarGastosOperativosDesdePublicidad();
+recalcularClientes();
+var negativos=productos.filter(function(p){return Number(p.stock)<0});
+if(negativos.length)toast('⚠️ Hay '+negativos.length+' producto(s) con stock negativo por ventas simultáneas. Revisen esos productos.');
+guardarTodo(true);renderTodo();
+return true;
+}
+function nubeDescargarConETag(){
+var url=nubeUrlDatos();if(!url)return Promise.reject(new Error('sin_url'));
+return fetch(url,{headers:{'X-Firebase-ETag':'true'}}).then(function(r){
+if(!r.ok)throw new Error('http_'+r.status);return r.json().then(function(data){return{data:data,etag:r.headers.get('ETag')||r.headers.get('etag')||null}});
+});
+}
+function nubeSubirCondicional(data,etag){
+var url=nubeUrlDatos();
+var h={'Content-Type':'application/json'};if(etag)h['If-Match']=etag;
+return fetch(url,{method:'PUT',headers:h,body:JSON.stringify(data)}).then(function(r){
+if(r.status===412){var e=new Error('conflicto');e.codigo=412;throw e}
+if(!r.ok)throw new Error('http_'+r.status);return true;
+});
+}
+function nubeSincronizarCompleto(silencioso,intento){
+if(!nubeCfg.activo||!nubeCfg.url)return;
+if(silencioso&&hayModalAbierto())return;
+if(nubeSubiendo)return;
+nubeSubiendo=true;intento=intento||0;
+if(!silencioso)nubeEstadoUI('🔄 Sincronizando cambios…','var(--amarillo)');
+var local=nubePrepararEstadoLocal();
+nubeDescargarConETag().then(function(res){
+var remoto=normalizarCloud(res.data);
+var merged=mergeCloud(local,remoto||{});
+return nubeSubirCondicional(merged,res.etag).then(function(){
+  aplicarCloud(merged);nubePendiente=false;nubeSubiendo=false;
+  nubeEstadoUI('✅ Sincronizado · '+new Date().toLocaleTimeString(),'var(--verde)');
+}).catch(function(err){
+  if(err&&err.codigo===412&&intento<4){nubeSubiendo=false;return nubeSincronizarCompleto(silencioso,intento+1)}
+  nubeSubiendo=false;nubePendiente=true;throw err;
+});
+}).catch(function(){
+if(!silencioso)nubeEstadoUI('⚠️ Sin conexión: cambios guardados en este dispositivo y se sincronizarán al reconectar.','#D93025');
+});
+}
+function nubeSubir(){nubeSincronizarCompleto(false,0)}
 function nubeSubirDebounced(){
 if(!nubeCfg.activo)return;
 clearTimeout(window.__nubeDebounce);
-window.__nubeDebounce=setTimeout(nubeSubir,800);
+window.__nubeDebounce=setTimeout(function(){nubeSincronizarCompleto(false,0)},700);
 }
-function hayModalAbierto(){
-return !!document.querySelector('.modal-overlay.abierto');
-}
-function nubeBajar(silencioso){
-if(silencioso&&hayModalAbierto())return;
-var url=nubeUrlDatos();if(!url)return;
-if(!silencioso)nubeEstadoUI('Descargando datos compartidos…','var(--amarillo)');
-fetch(url).then(function(r){
-if(!r.ok)throw new Error('http_'+r.status);
-return r.json();
-}).then(function(d){
-if(!d){if(!silencioso)nubeEstadoUI('La nube está vacía todavía: se subirán tus datos locales.','var(--gris)'),nubeSubir();return}
-if(typeof d!=='object'||d.error||(!Array.isArray(d.productos)&&!Array.isArray(d.ventas))){
-if(!silencioso)nubeEstadoUI('⚠️ La nube respondió algo inesperado (posible error de permisos). No se tocaron tus datos locales.','#D93025');
-return;
-}
-var local=nubeRecopilarDatos();
-if(silencioso&&d.actualizadoEn&&d.actualizadoEn<=(local.__ultimaAplicada||0))return;
-productos=d.productos||[];ventas=d.ventas||[];clientes=d.clientes||[];pagos=d.pagos||[];movimientos=d.movimientos||[];
-gastos=d.gastos||[];gastosOp=d.gastosOp||[];config=d.configuracion||config;aportes=d.aportes||[];gastosFormalizacion=d.gastosFormalizacion||[];
-migrarGastosOperativosDesdePublicidad();
-sueldos=d.sueldos||[];notaEstrategia=d.notaEstrategia||'';
-productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
-local.__ultimaAplicada=d.actualizadoEn;
-guardarTodo(true);renderTodo();
-if(!silencioso)nubeEstadoUI('✅ Datos compartidos cargados','var(--verde)');
-}).catch(function(){if(!silencioso)nubeEstadoUI('⚠️ No se pudo conectar a la nube (permiso denegado o URL/clave incorrecta). No se tocaron tus datos locales.','#D93025')});
-}
+function hayModalAbierto(){return !!document.querySelector('.modal-overlay.abierto')}
+function nubeBajar(silencioso){nubeSincronizarCompleto(!!silencioso,0)}
 function nubeEstadoUI(msg,color){
 var el=$('nubeEstado');if(el){el.textContent=msg;el.style.color=color||'var(--gris)'}
 var ind=$('indicadorNube');
-if(ind)ind.textContent=nubeCfg.activo?('☁️ Sincronización activa — '+(nubeCfg.espacio||'trendia')):'☁️ Solo en este dispositivo';
+if(ind){ind.textContent=nubeCfg.activo?('☁️ Sincronización activa — '+(nubeCfg.espacio||'trendia')):'☁️ Solo en este dispositivo'}
 }
 function nubeIniciar(){
-nubeEstadoUI('');
-if(nubeCfg.activo&&nubeCfg.url){
-nubeBajar(false);
-if(nubeTimer)clearInterval(nubeTimer);
-nubeTimer=setInterval(function(){nubeBajar(true)},20000);
-}
+clearInterval(nubeTimer);nubeEstadoUI('');
+if(!nubeCfg.activo||!nubeCfg.url)return;
+window.addEventListener('online',function(){nubeEstadoUI('🌐 Conexión recuperada. Sincronizando…','var(--amarillo)');nubeSincronizarCompleto(false,0)});
+window.addEventListener('offline',function(){nubeEstadoUI('📴 Sin conexión. Los cambios quedan guardados en este dispositivo.','#D93025')});
+nubeSincronizarCompleto(false,0);
+nubeTimer=setInterval(function(){if(!hayModalAbierto())nubeSincronizarCompleto(true,0)},20000);
 }
 
 /* ============================================================
@@ -1670,7 +1805,7 @@ $('btnDescargarTodo').onclick=descargarTodoZip;
    BACKUP / RESTAURAR
    ============================================================ */
 function descargarBackup(){
-var data={version:6,fecha_respaldo:new Date().toISOString(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
+var data={version:7,fecha_respaldo:new Date().toISOString(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
 descargar(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'respaldo_tendria_'+hoy()+'.json');toast('Respaldo descargado 💾');
 }
 function restaurarBackup(archivo){
