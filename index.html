@@ -545,7 +545,7 @@ montoPagado:total,saldoPendiente:0,fechaCompromiso:'',total:total,costo:0,utilid
 }
 /* asegurar campo estado en productos existentes */
 productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
-if(productos.length||ventas.length)guardarTodo();
+if(productos.length||ventas.length)guardarTodo(true);
 })();
 
 function limpiarMeta(o){
