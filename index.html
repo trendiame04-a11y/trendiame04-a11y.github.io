@@ -213,7 +213,7 @@ header h1{color:#fff;font-size:1.6rem;letter-spacing:2px} header p{color:rgba(25
 <div class="form-grid">
 <div class="campo"><label>Fecha</label><input type="date" id="mgoFecha"></div>
 <div class="campo"><label>Categoría</label><select id="mgoCategoria">
-<option>Transporte / Taxi</option><option>Combi / Pasaje</option><option>Insumos de empaque</option><option>Compra de mercadería menor</option><option>Otros</option>
+<option>Transporte / Taxi</option><option>Flete / Envío</option><option>Combi / Pasaje</option><option>Insumos de empaque</option><option>Compra de mercadería menor</option><option>Otros</option>
 </select></div>
 <div class="campo full"><label>Concepto</label><input id="mgoConcepto" placeholder="Ej. Taxi a proveedor por parlantes"></div>
 <div class="campo"><label>Monto (S/)</label><input type="number" id="mgoMonto" step="0.01" min="0"></div>
@@ -484,6 +484,32 @@ var productos=leer(K_PROD), ventas=leer(K_VENT), clientes=leer(K_CLI), pagos=lee
 var config=leerObj(K_CFG,{stockBajoDefault:10});
 var aportes=leer(K_APORTES), gastosFormalizacion=leer(K_GFORM), sueldos=leer(K_SUELDOS);
 var notaEstrategia=localStorage.getItem(K_NOTA_ESTR)||'';
+
+/* Migración: gastos operativos que fueron registrados por error en Publicidad.
+   Se identifican por los conceptos exactos que corresponden a gastos del negocio. */
+function migrarGastosOperativosDesdePublicidad(){
+var movidos=[];
+gastos=gastos.filter(function(g){
+  var detalle=String(g.detalle||'').trim();
+  var categoria='';
+  if(detalle==='Taxi - Edgar' || detalle==='Taxi - Maribel'){
+    categoria='Transporte / Taxi';
+  }else if(detalle.indexOf('Flete de parlantes de 4 bocinas a 68 y 22 soles el taxi')===0){
+    categoria='Flete / Envío';
+  }else if(detalle.indexOf('Gastos - Pizarra, plumones, mota, fil negro')===0){
+    categoria='Otros';
+  }else{
+    return true;
+  }
+  gastosOp.push({id:uid(),fecha:g.fecha||hoy(),categoria:categoria,concepto:detalle,comprobante:'Sin comprobante',monto:Number(g.monto)||0});
+  movidos.push(detalle);
+  return false;
+});
+return movidos.length;
+}
+
+// Ejecutar antes de cualquier render para que esos gastos dejen de aparecer en Publicidad.
+migrarGastosOperativosDesdePublicidad();
 var nubeCfg=leerObj(K_NUBE_CFG,{url:'',espacio:'trendia',activo:false});
 
 /* Migración desde el esquema antiguo (no se borran las claves originales) */
@@ -528,7 +554,7 @@ localStorage.setItem(K_APORTES,JSON.stringify(aportes));
 localStorage.setItem(K_GFORM,JSON.stringify(gastosFormalizacion));
 localStorage.setItem(K_SUELDOS,JSON.stringify(sueldos));
 localStorage.setItem(K_NOTA_ESTR,notaEstrategia);
-localStorage.setItem(K_BKV,'5');
+localStorage.setItem(K_BKV,'6');
 if(!desdeNube)nubeSubirDebounced();
 }
 
@@ -543,7 +569,7 @@ var espacio=(nubeCfg.espacio||'trendia').replace(/[^a-zA-Z0-9_-]/g,'')||'trendia
 return base+'/'+espacio+'.json';
 }
 function nubeRecopilarDatos(){
-return {version:5,actualizadoEn:Date.now(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,
+return {version:6,actualizadoEn:Date.now(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,
 movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,
 gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
 }
@@ -580,6 +606,7 @@ var local=nubeRecopilarDatos();
 if(silencioso&&d.actualizadoEn&&d.actualizadoEn<=(local.__ultimaAplicada||0))return;
 productos=d.productos||[];ventas=d.ventas||[];clientes=d.clientes||[];pagos=d.pagos||[];movimientos=d.movimientos||[];
 gastos=d.gastos||[];gastosOp=d.gastosOp||[];config=d.configuracion||config;aportes=d.aportes||[];gastosFormalizacion=d.gastosFormalizacion||[];
+migrarGastosOperativosDesdePublicidad();
 sueldos=d.sueldos||[];notaEstrategia=d.notaEstrategia||'';
 productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
 local.__ultimaAplicada=d.actualizadoEn;
@@ -1438,8 +1465,12 @@ html+='<tr'+(v.devuelta?' style="opacity:.55"':'')+'>'+
 (!v.devuelta?'<button type="button" class="editbtn" data-devolver="'+v.id+'" title="Devolución">↩️</button>':'')+
 '<button type="button" class="del" data-del="'+v.id+'" title="Eliminar">🗑</button></td></tr>';
 });
-var u=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.unidades)||0)},0),s=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.total)||0)},0);
-html+='<tr class="total-row"><td colspan="7">TOTAL DEL PERÍODO</td><td>'+u+'</td><td></td><td class="num">'+moneda(s)+'</td><td colspan="6"></td></tr>';
+var u=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.unidades)||0)},0);
+var s=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.total)||0)},0);
+var pag=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.montoPagado)||0)},0);
+var debe=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.saldoPendiente)||0)},0);
+var util=lista.reduce(function(a,v){return a+(v.devuelta?0:Number(v.utilidad)||0)},0);
+html+='<tr class="total-row"><td colspan="7">TOTALES DEL PERÍODO</td><td>'+u+'</td><td></td><td class="num">'+moneda(s)+'</td><td class="num">'+moneda(pag)+'</td><td class="num">'+moneda(debe)+'</td><td></td><td></td><td class="num">'+moneda(util)+'</td><td></td></tr>';
 tb.innerHTML=html;
 }
 var activas=lista.filter(function(v){return !v.devuelta});
@@ -1639,7 +1670,7 @@ $('btnDescargarTodo').onclick=descargarTodoZip;
    BACKUP / RESTAURAR
    ============================================================ */
 function descargarBackup(){
-var data={version:5,fecha_respaldo:new Date().toISOString(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
+var data={version:6,fecha_respaldo:new Date().toISOString(),productos:productos,ventas:ventas,clientes:clientes,pagos:pagos,movimientos:movimientos,gastos:gastos,gastosOp:gastosOp,configuracion:config,aportes:aportes,gastosFormalizacion:gastosFormalizacion,sueldos:sueldos,notaEstrategia:notaEstrategia};
 descargar(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'respaldo_tendria_'+hoy()+'.json');toast('Respaldo descargado 💾');
 }
 function restaurarBackup(archivo){
@@ -1650,6 +1681,7 @@ if(!d||!Array.isArray(d.ventas)||!Array.isArray(d.productos))throw Error();
 if(!confirm('Esto reemplazará todos los datos actuales (productos, ventas, clientes, pagos, movimientos, publicidad y gastos). ¿Continuar?'))return;
 productos=d.productos||[];ventas=d.ventas||[];clientes=d.clientes||[];pagos=d.pagos||[];movimientos=d.movimientos||[];gastos=d.gastos||[];gastosOp=d.gastosOp||[];config=d.configuracion||config;
 aportes=d.aportes||[];gastosFormalizacion=d.gastosFormalizacion||[];sueldos=d.sueldos||[];notaEstrategia=d.notaEstrategia||'';
+migrarGastosOperativosDesdePublicidad();
 productos.forEach(function(p){if(!p.estado)p.estado='Activo'});
 guardarTodo();renderTodo();toast('Respaldo restaurado ✅');
 }catch(err){alert('El archivo no es un respaldo válido de TRENDIA.')}};lector.readAsText(archivo);
