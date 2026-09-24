@@ -208,7 +208,7 @@ header h1{color:#fff;font-size:1.6rem;letter-spacing:2px} header p{color:rgba(25
 <!-- ============ MODAL GASTO OPERATIVO ============ -->
 <div class="modal-overlay" id="modalGastoOpOverlay">
 <div class="modal">
-<div class="modal-head"><span>Registrar gasto operativo</span><button type="button" id="cerrarModalGastoOp">✕</button></div>
+<div class="modal-head"><span id="tituloModalGastoOp">Registrar gasto operativo</span><button type="button" id="cerrarModalGastoOp">✕</button></div>
 <div class="modal-body">
 <div class="form-grid">
 <div class="campo"><label>Fecha</label><input type="date" id="mgoFecha"></div>
@@ -271,7 +271,7 @@ Estas cifras se arman con lo que ustedes registran; TRENDIA no supone montos que
 <!-- ============ MODAL APORTE SOCIO ============ -->
 <div class="modal-overlay" id="modalAporteOverlay">
 <div class="modal">
-<div class="modal-head"><span>Registrar aporte de socio</span><button type="button" id="cerrarModalAporte">✕</button></div>
+<div class="modal-head"><span id="tituloModalAporte">Registrar aporte de socio</span><button type="button" id="cerrarModalAporte">✕</button></div>
 <div class="modal-body">
 <div class="form-grid">
 <div class="campo"><label>Fecha</label><input type="date" id="maFecha"></div>
@@ -288,7 +288,7 @@ Estas cifras se arman con lo que ustedes registran; TRENDIA no supone montos que
 <!-- ============ MODAL GASTO DE FORMALIZACIÓN ============ -->
 <div class="modal-overlay" id="modalGastoFormOverlay">
 <div class="modal">
-<div class="modal-head"><span>Registrar gasto de formalización</span><button type="button" id="cerrarModalGastoForm">✕</button></div>
+<div class="modal-head"><span id="tituloModalGastoForm">Registrar gasto de formalización</span><button type="button" id="cerrarModalGastoForm">✕</button></div>
 <div class="modal-body">
 <div class="form-grid">
 <div class="campo"><label>Fecha</label><input type="date" id="mgfFecha"></div>
@@ -303,7 +303,7 @@ Estas cifras se arman con lo que ustedes registran; TRENDIA no supone montos que
 <!-- ============ MODAL SUELDO / RETIRO ============ -->
 <div class="modal-overlay" id="modalSueldoOverlay">
 <div class="modal">
-<div class="modal-head"><span>Registrar sueldo / retiro</span><button type="button" id="cerrarModalSueldo">✕</button></div>
+<div class="modal-head"><span id="tituloModalSueldo">Registrar sueldo / retiro</span><button type="button" id="cerrarModalSueldo">✕</button></div>
 <div class="modal-body">
 <div class="form-grid">
 <div class="campo"><label>Fecha</label><input type="date" id="msFecha"></div>
@@ -949,15 +949,31 @@ if(p==='mes')return{desde:h.slice(0,7)+'-01',hasta:h};
 if(p==='mesant'){var d=new Date(h+'T00:00:00');d.setDate(1);d.setDate(d.getDate()-1);var m=d.toISOString().slice(0,7);return{desde:m+'-01',hasta:d.toISOString().slice(0,10)}}
 return{desde:'0000-00-00',hasta:'9999-99-99'};
 }
-$('btnNuevoGasto').onclick=function(){$('mgaFecha').value=hoy();$('mgaCanal').value='Facebook Ads';$('mgaDetalle').value='';$('mgaMonto').value='';gastoEditandoId=null;$('modalGastoOverlay').classList.add('abierto')};
 var gastoEditandoId=null;
+function abrirModalGasto(g){
+gastoEditandoId=g?g.id:null;
+$('tituloModalGasto').textContent=g?'Editar inversión publicitaria':'Registrar inversión publicitaria';
+$('mgaFecha').value=g?g.fecha:hoy();
+$('mgaCanal').value=g?g.canal:'Facebook Ads';
+$('mgaDetalle').value=g?g.detalle:'';
+$('mgaMonto').value=g?g.monto:'';
+$('modalGastoOverlay').classList.add('abierto');
+}
+$('btnNuevoGasto').onclick=function(){abrirModalGasto(null)};
 function cerrarModalGasto(){$('modalGastoOverlay').classList.remove('abierto');gastoEditandoId=null}
 $('cerrarModalGasto').onclick=cerrarModalGasto;$('cancelarGasto').onclick=cerrarModalGasto;
 $('guardarGasto').onclick=function(){
 var monto=Math.max(0,parseFloat($('mgaMonto').value)||0);
 if(monto<=0){toast('⚠️ Ingresa un monto de inversión mayor a 0');return}
+if(gastoEditandoId){
+var g=gastos.find(function(x){return x.id===gastoEditandoId});
+g.fecha=$('mgaFecha').value||hoy();g.canal=$('mgaCanal').value;g.detalle=$('mgaDetalle').value.trim();g.monto=monto;
+toast('Inversión actualizada ✅');
+}else{
 gastos.unshift({id:uid(),fecha:$('mgaFecha').value||hoy(),canal:$('mgaCanal').value,detalle:$('mgaDetalle').value.trim(),monto:monto});
-guardarTodo();cerrarModalGasto();renderTodo();toast('Inversión registrada ✅');
+toast('Inversión registrada ✅');
+}
+guardarTodo();cerrarModalGasto();renderTodo();
 };
 function eliminarGasto(id){if(!confirm('¿Eliminar este registro de inversión?'))return;gastos=gastos.filter(function(g){return g.id!==id});guardarTodo();renderTodo()}
 $('btnBorrarGastos').onclick=function(){if(!gastos.length){toast('No hay registros');return}if(confirm('¿Borrar TODOS los registros de inversión publicitaria?')){gastos=[];guardarTodo();renderTodo();toast('Registros borrados')}};
@@ -979,8 +995,9 @@ if(!gastos.length){cuerpo.innerHTML='<tr><td colspan="5" class="vacio">Aún no r
 else{
 var ordenados=gastos.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1});
 cuerpo.innerHTML=ordenados.map(function(g){return '<tr><td>'+esc(g.fecha)+'</td><td>'+esc(g.canal)+'</td><td>'+esc(g.detalle||'—')+'</td><td class="num">'+moneda(g.monto)+'</td>'+
-'<td><button type="button" class="del" data-delgasto="'+g.id+'">🗑️</button></td></tr>'}).join('');
+'<td><button type="button" class="editbtn" data-editgasto="'+g.id+'" title="Editar">✏️</button><button type="button" class="del" data-delgasto="'+g.id+'" title="Eliminar">🗑️</button></td></tr>'}).join('');
 }
+cuerpo.querySelectorAll('[data-editgasto]').forEach(function(b){b.onclick=function(){var g=gastos.find(function(x){return x.id===b.dataset.editgasto});if(g)abrirModalGasto(g)}});
 cuerpo.querySelectorAll('[data-delgasto]').forEach(function(b){b.onclick=function(){eliminarGasto(b.dataset.delgasto)}});
 /* gráfico por semana (últimas 8) */
 var semanas=[];for(var i=7;i>=0;i--){var ini=inicioSemana(diasDesde(hoy(),-i*7));semanas.push(ini)}
@@ -1007,19 +1024,34 @@ if(p==='anio')return{desde:h.slice(0,4)+'-01-01',hasta:h};
 return{desde:'0000-00-00',hasta:'9999-99-99'};
 }
 $('goPeriodo').addEventListener('change',renderGastosOp);
-$('btnNuevoGastoOp').onclick=function(){
-$('mgoFecha').value=hoy();$('mgoCategoria').value='Transporte / Taxi';$('mgoConcepto').value='';$('mgoMonto').value='';$('mgoComprobante').value='Sin comprobante';
+var gastoOpEditandoId=null;
+function abrirModalGastoOp(g){
+gastoOpEditandoId=g?g.id:null;
+$('tituloModalGastoOp').textContent=g?'Editar gasto operativo':'Registrar gasto operativo';
+$('mgoFecha').value=g?g.fecha:hoy();
+$('mgoCategoria').value=g?g.categoria:'Transporte / Taxi';
+$('mgoConcepto').value=g?g.concepto:'';
+$('mgoMonto').value=g?g.monto:'';
+$('mgoComprobante').value=g?g.comprobante:'Sin comprobante';
 $('modalGastoOpOverlay').classList.add('abierto');
-};
-function cerrarModalGastoOp(){$('modalGastoOpOverlay').classList.remove('abierto')}
+}
+$('btnNuevoGastoOp').onclick=function(){abrirModalGastoOp(null)};
+function cerrarModalGastoOp(){$('modalGastoOpOverlay').classList.remove('abierto');gastoOpEditandoId=null}
 $('cerrarModalGastoOp').onclick=cerrarModalGastoOp;$('cancelarGastoOp').onclick=cerrarModalGastoOp;
 $('guardarGastoOp').onclick=function(){
 var monto=Math.max(0,parseFloat($('mgoMonto').value)||0);
 var concepto=$('mgoConcepto').value.trim();
 if(!concepto){toast('⚠️ Indica el concepto del gasto');return}
 if(monto<=0){toast('⚠️ Ingresa un monto mayor a 0');return}
+if(gastoOpEditandoId){
+var g=gastosOp.find(function(x){return x.id===gastoOpEditandoId});
+g.fecha=$('mgoFecha').value||hoy();g.categoria=$('mgoCategoria').value;g.concepto=concepto;g.comprobante=$('mgoComprobante').value;g.monto=monto;
+toast('Gasto actualizado ✅');
+}else{
 gastosOp.unshift({id:uid(),fecha:$('mgoFecha').value||hoy(),categoria:$('mgoCategoria').value,concepto:concepto,comprobante:$('mgoComprobante').value,monto:monto});
-guardarTodo();cerrarModalGastoOp();renderTodo();toast('Gasto registrado ✅');
+toast('Gasto registrado ✅');
+}
+guardarTodo();cerrarModalGastoOp();renderTodo();
 };
 function eliminarGastoOp(id){if(!confirm('¿Eliminar este gasto operativo?'))return;gastosOp=gastosOp.filter(function(g){return g.id!==id});guardarTodo();renderTodo()}
 $('btnBorrarGastosOp').onclick=function(){if(!gastosOp.length){toast('No hay registros');return}if(confirm('¿Borrar TODOS los gastos operativos?')){gastosOp=[];guardarTodo();renderTodo();toast('Registros borrados')}};
@@ -1034,8 +1066,9 @@ if(!gastosOp.length){cuerpo.innerHTML='<tr><td colspan="6" class="vacio">Aún no
 else{
 var ordenados=gastosOp.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1});
 cuerpo.innerHTML=ordenados.map(function(g){return '<tr><td>'+esc(g.fecha)+'</td><td>'+esc(g.categoria)+'</td><td>'+esc(g.concepto)+'</td><td>'+esc(g.comprobante)+'</td><td class="num">'+moneda(g.monto)+'</td>'+
-'<td><button type="button" class="del" data-delgastoop="'+g.id+'">🗑️</button></td></tr>'}).join('');
+'<td><button type="button" class="editbtn" data-editgastoop="'+g.id+'" title="Editar">✏️</button><button type="button" class="del" data-delgastoop="'+g.id+'" title="Eliminar">🗑️</button></td></tr>'}).join('');
 }
+cuerpo.querySelectorAll('[data-editgastoop]').forEach(function(b){b.onclick=function(){var g=gastosOp.find(function(x){return x.id===b.dataset.editgastoop});if(g)abrirModalGastoOp(g)}});
 cuerpo.querySelectorAll('[data-delgastoop]').forEach(function(b){b.onclick=function(){eliminarGastoOp(b.dataset.delgastoop)}});
 }
 
@@ -1068,53 +1101,107 @@ kpi('👤 Sueldos / retiros',moneda(totalSueldos));
 
 var cA=$('cuerpoAportes');
 cA.innerHTML=!aportes.length?'<tr><td colspan="6" class="vacio">Aún no registran aportes</td></tr>':
-aportes.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(a){return '<tr><td>'+esc(a.fecha)+'</td><td>'+esc(a.socio)+'</td><td>'+esc(a.tipo)+'</td><td class="num">'+moneda(a.monto)+'</td><td>'+esc(a.nota||'—')+'</td><td><button type="button" class="del" data-delaporte="'+a.id+'">🗑️</button></td></tr>'}).join('');
+aportes.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(a){return '<tr><td>'+esc(a.fecha)+'</td><td>'+esc(a.socio)+'</td><td>'+esc(a.tipo)+'</td><td class="num">'+moneda(a.monto)+'</td><td>'+esc(a.nota||'—')+'</td><td><button type="button" class="editbtn" data-editaporte="'+a.id+'" title="Editar">✏️</button><button type="button" class="del" data-delaporte="'+a.id+'" title="Eliminar">🗑️</button></td></tr>'}).join('');
+cA.querySelectorAll('[data-editaporte]').forEach(function(b){b.onclick=function(){var a=aportes.find(function(x){return x.id===b.dataset.editaporte});if(a)abrirModalAporte(a)}});
 cA.querySelectorAll('[data-delaporte]').forEach(function(b){b.onclick=function(){if(confirm('¿Eliminar este aporte?')){aportes=aportes.filter(function(x){return x.id!==b.dataset.delaporte});guardarTodo();renderTodo()}}});
 
 var cG=$('cuerpoGastosForm');
 cG.innerHTML=!gastosFormalizacion.length?'<tr><td colspan="4" class="vacio">Aún no registran gastos de formalización</td></tr>':
-gastosFormalizacion.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(g){return '<tr><td>'+esc(g.fecha)+'</td><td>'+esc(g.concepto)+'</td><td class="num">'+moneda(g.monto)+'</td><td><button type="button" class="del" data-delgform="'+g.id+'">🗑️</button></td></tr>'}).join('');
+gastosFormalizacion.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(g){return '<tr><td>'+esc(g.fecha)+'</td><td>'+esc(g.concepto)+'</td><td class="num">'+moneda(g.monto)+'</td><td><button type="button" class="editbtn" data-editgform="'+g.id+'" title="Editar">✏️</button><button type="button" class="del" data-delgform="'+g.id+'" title="Eliminar">🗑️</button></td></tr>'}).join('');
+cG.querySelectorAll('[data-editgform]').forEach(function(b){b.onclick=function(){var g=gastosFormalizacion.find(function(x){return x.id===b.dataset.editgform});if(g)abrirModalGastoForm(g)}});
 cG.querySelectorAll('[data-delgform]').forEach(function(b){b.onclick=function(){if(confirm('¿Eliminar este gasto?')){gastosFormalizacion=gastosFormalizacion.filter(function(x){return x.id!==b.dataset.delgform});guardarTodo();renderTodo()}}});
 
 var cS=$('cuerpoSueldos');
 cS.innerHTML=!sueldos.length?'<tr><td colspan="5" class="vacio">Aún no registran sueldos o retiros</td></tr>':
-sueldos.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(s){return '<tr><td>'+esc(s.fecha)+'</td><td>'+esc(s.socio)+'</td><td>'+esc(s.concepto)+'</td><td class="num">'+moneda(s.monto)+'</td><td><button type="button" class="del" data-delsueldo="'+s.id+'">🗑️</button></td></tr>'}).join('');
+sueldos.slice().sort(function(a,b){return b.fecha<a.fecha?-1:1}).map(function(s){return '<tr><td>'+esc(s.fecha)+'</td><td>'+esc(s.socio)+'</td><td>'+esc(s.concepto)+'</td><td class="num">'+moneda(s.monto)+'</td><td><button type="button" class="editbtn" data-editsueldo="'+s.id+'" title="Editar">✏️</button><button type="button" class="del" data-delsueldo="'+s.id+'" title="Eliminar">🗑️</button></td></tr>'}).join('');
+cS.querySelectorAll('[data-editsueldo]').forEach(function(b){b.onclick=function(){var s=sueldos.find(function(x){return x.id===b.dataset.editsueldo});if(s)abrirModalSueldo(s)}});
 cS.querySelectorAll('[data-delsueldo]').forEach(function(b){b.onclick=function(){if(confirm('¿Eliminar este registro?')){sueldos=sueldos.filter(function(x){return x.id!==b.dataset.delsueldo});guardarTodo();renderTodo()}}});
 }
 
 $('guardarNotaEstrategia').onclick=function(){notaEstrategia=$('notaEstrategia').value;guardarTodo();toast('Nota guardada ✅')};
 
-function cerrarModalAporte(){$('modalAporteOverlay').classList.remove('abierto')}
-$('btnNuevoAporte').onclick=function(){$('maFecha').value=hoy();$('maSocio').value='';$('maMonto').value='';$('maNota').value='';$('modalAporteOverlay').classList.add('abierto')};
+var aporteEditandoId=null;
+function abrirModalAporte(a){
+aporteEditandoId=a?a.id:null;
+$('tituloModalAporte').textContent=a?'Editar aporte de socio':'Registrar aporte de socio';
+$('maFecha').value=a?a.fecha:hoy();
+$('maSocio').value=a?a.socio:'';
+$('maTipo').value=a?a.tipo:'Efectivo';
+$('maMonto').value=a?a.monto:'';
+$('maNota').value=a?(a.nota||''):'';
+$('modalAporteOverlay').classList.add('abierto');
+}
+function cerrarModalAporte(){$('modalAporteOverlay').classList.remove('abierto');aporteEditandoId=null}
+$('btnNuevoAporte').onclick=function(){abrirModalAporte(null)};
 $('cerrarModalAporte').onclick=cerrarModalAporte;$('cancelarAporte').onclick=cerrarModalAporte;
 $('guardarAporte').onclick=function(){
 var monto=Math.max(0,parseFloat($('maMonto').value)||0),socio=$('maSocio').value.trim();
 if(!socio){toast('⚠️ Indica el nombre del socio');return}
 if(monto<=0){toast('⚠️ Ingresa un monto mayor a 0');return}
+if(aporteEditandoId){
+var a=aportes.find(function(x){return x.id===aporteEditandoId});
+a.fecha=$('maFecha').value||hoy();a.socio=socio;a.tipo=$('maTipo').value;a.monto=monto;a.nota=$('maNota').value.trim();
+toast('Aporte actualizado ✅');
+}else{
 aportes.unshift({id:uid(),fecha:$('maFecha').value||hoy(),socio:socio,tipo:$('maTipo').value,monto:monto,nota:$('maNota').value.trim()});
-guardarTodo();cerrarModalAporte();renderTodo();toast('Aporte registrado ✅');
+toast('Aporte registrado ✅');
+}
+guardarTodo();cerrarModalAporte();renderTodo();
 };
 
-function cerrarModalGastoForm(){$('modalGastoFormOverlay').classList.remove('abierto')}
-$('btnNuevoGastoForm').onclick=function(){$('mgfFecha').value=hoy();$('mgfMonto').value='';$('mgfConcepto').value='';$('modalGastoFormOverlay').classList.add('abierto')};
+var gastoFormEditandoId=null;
+function abrirModalGastoForm(g){
+gastoFormEditandoId=g?g.id:null;
+$('tituloModalGastoForm').textContent=g?'Editar gasto de formalización':'Registrar gasto de formalización';
+$('mgfFecha').value=g?g.fecha:hoy();
+$('mgfMonto').value=g?g.monto:'';
+$('mgfConcepto').value=g?g.concepto:'';
+$('modalGastoFormOverlay').classList.add('abierto');
+}
+function cerrarModalGastoForm(){$('modalGastoFormOverlay').classList.remove('abierto');gastoFormEditandoId=null}
+$('btnNuevoGastoForm').onclick=function(){abrirModalGastoForm(null)};
 $('cerrarModalGastoForm').onclick=cerrarModalGastoForm;$('cancelarGastoForm').onclick=cerrarModalGastoForm;
 $('guardarGastoForm').onclick=function(){
 var monto=Math.max(0,parseFloat($('mgfMonto').value)||0),concepto=$('mgfConcepto').value.trim();
 if(!concepto){toast('⚠️ Indica el concepto del gasto');return}
 if(monto<=0){toast('⚠️ Ingresa un monto mayor a 0');return}
+if(gastoFormEditandoId){
+var g=gastosFormalizacion.find(function(x){return x.id===gastoFormEditandoId});
+g.fecha=$('mgfFecha').value||hoy();g.concepto=concepto;g.monto=monto;
+toast('Gasto actualizado ✅');
+}else{
 gastosFormalizacion.unshift({id:uid(),fecha:$('mgfFecha').value||hoy(),concepto:concepto,monto:monto});
-guardarTodo();cerrarModalGastoForm();renderTodo();toast('Gasto registrado ✅');
+toast('Gasto registrado ✅');
+}
+guardarTodo();cerrarModalGastoForm();renderTodo();
 };
 
-function cerrarModalSueldo(){$('modalSueldoOverlay').classList.remove('abierto')}
-$('btnNuevoSueldo').onclick=function(){$('msFecha').value=hoy();$('msSocio').value='';$('msMonto').value='';$('msConcepto').value='';$('modalSueldoOverlay').classList.add('abierto')};
+var sueldoEditandoId=null;
+function abrirModalSueldo(s){
+sueldoEditandoId=s?s.id:null;
+$('tituloModalSueldo').textContent=s?'Editar sueldo / retiro':'Registrar sueldo / retiro';
+$('msFecha').value=s?s.fecha:hoy();
+$('msSocio').value=s?s.socio:'';
+$('msMonto').value=s?s.monto:'';
+$('msConcepto').value=s?s.concepto:'';
+$('modalSueldoOverlay').classList.add('abierto');
+}
+function cerrarModalSueldo(){$('modalSueldoOverlay').classList.remove('abierto');sueldoEditandoId=null}
+$('btnNuevoSueldo').onclick=function(){abrirModalSueldo(null)};
 $('cerrarModalSueldo').onclick=cerrarModalSueldo;$('cancelarSueldo').onclick=cerrarModalSueldo;
 $('guardarSueldo').onclick=function(){
 var monto=Math.max(0,parseFloat($('msMonto').value)||0),socio=$('msSocio').value.trim();
 if(!socio){toast('⚠️ Indica el nombre del socio');return}
 if(monto<=0){toast('⚠️ Ingresa un monto mayor a 0');return}
+if(sueldoEditandoId){
+var s=sueldos.find(function(x){return x.id===sueldoEditandoId});
+s.fecha=$('msFecha').value||hoy();s.socio=socio;s.monto=monto;s.concepto=$('msConcepto').value.trim()||'Sueldo/retiro';
+toast('Registro actualizado ✅');
+}else{
 sueldos.unshift({id:uid(),fecha:$('msFecha').value||hoy(),socio:socio,concepto:$('msConcepto').value.trim()||'Sueldo/retiro',monto:monto});
-guardarTodo();cerrarModalSueldo();renderTodo();toast('Registro guardado ✅');
+toast('Registro guardado ✅');
+}
+guardarTodo();cerrarModalSueldo();renderTodo();
 };
 
 /* ---- Configuración de sincronización en la nube ---- */
